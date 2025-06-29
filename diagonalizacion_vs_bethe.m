@@ -5,8 +5,13 @@
 % para N espines con condiciones de contorno periódicas, incluyendo un 
 % campo magnético externo B; y lo diagonaliza, calculando los autovalores y
 % autovectores.
-% Luego, resuelve las ecuaciones de Bethe proporcionadas por el ansatz y
-% calcula las energías propias correspondientes a cada estado.
+%
+% Luego, resuelve las ecuaciones de Bethe en cada subespacio de magnones y 
+% calcula la energía propia correspondiente a cada estado hasta replicar 
+% todas las soluciones numéricas resultado de la diagonalización. Se 
+% imprime la combinación de números cuánticos de Bethe (m_j) y los 
+% cuasimomentos de los magnones que definen al autoestado.
+%
 % Finalmente, representa ambas soluciones de autovalores en una misma
 % gráfica de energía frente a M (número de espines volteados).
 % -------------------------------------------------------------------------
@@ -48,24 +53,30 @@ E_bethe = cell(N+1, 1);  % Almacenar energías por sector M
 E0 = -J*N/4;  % Energía del estado de referencia
 
 for M_val = 0:N
+
+    fprintf('\n--------------------------------------------------\n');    
+    fprintf('Para M = %d hay %d estados propios\n', M_val, sum(M_diag == M_val));
+    fprintf('--------------------------------------------------\n');
+
     % Caso M=0 (estado de referencia)
     if M_val == 0
         E_bethe{1} = E0 - B*(N/2 - 0);
-        % Mostrar resultados
-fprintf('\n--------------------------------------------------\n');
-fprintf('Estado para M = %d\n', M_val);
-fprintf('Energía E = %.12f\n', E_bethe{1});
-fprintf('--------------------------------------------------\n');
+        
+        fprintf('\n--------------------------------------------------\n');
+        fprintf('Estado para M = %d\n', M_val);
+        fprintf('Energía E = %.12f\n', E_bethe{1});
+        fprintf('--------------------------------------------------\n');
         continue;
     end
     
-    % Caso M=N (estado todos los espines hacia abajo)
+    % Caso M=N (estado todos los espines volteados)
     if M_val == N
         E_bethe{N+1} = E0 - B*(N/2 - N);
-fprintf('\n--------------------------------------------------\n');
-fprintf('Estado para M = N = %d\n', M_val);
-fprintf('Energía E = %.12f\n', E_bethe{N+1});
-fprintf('--------------------------------------------------\n');        
+
+        fprintf('\n--------------------------------------------------\n');
+        fprintf('Estado para M = N = %d\n', M_val);
+        fprintf('Energía E = %.12f\n', E_bethe{N+1});
+        fprintf('--------------------------------------------------\n');        
         continue;
     end
     
@@ -80,56 +91,106 @@ fprintf('--------------------------------------------------\n');
             % Energía para este magnón
             en = E0 + J*(1 - cos(k1));
             energies(m1+1) = en;
-fprintf('\n--------------------------------------------------\n');
-fprintf('Estado para M = %d\n', M_val);
-fprintf('Número cuántico m_1 = [ %d ]\n', m1);
-fprintf('Cuasimomento k_1 = [ %s ]\n', num2str(k1, '%.6f '));
-fprintf('Energía E = %.12f\n', en);
-fprintf('--------------------------------------------------\n');
+            fprintf('\n--------------------------------------------------\n');
+            fprintf('Estado para M = %d\n', M_val);
+            fprintf('Número cuántico m_1 = [ %d ]\n', m1);
+            fprintf('Cuasimomento k_1 = [ %s ]\n', num2str(k1, '%.6f '));
+            fprintf('Energía E = %.12f\n', en);
+            fprintf('--------------------------------------------------\n');
         end
         
         % Eliminar duplicados en el círculo de momentos
         energies = unique(round(energies*1e8)/1e8); % Elimina duplicados numéricos
         E_bethe{M_val+1} = energies - B*(N/2 - M_val);
+
     else
         % Para M_val > 1, usar el solver de Bethe para cada combinación de m_j
         energies = [];
-        % Generar todas las combinaciones posibles de m_j (sin repetición)
-        m_combinations = nchoosek(0:N-1, M_val);
+        tol_match = 1e-1;  % Tolerancia para coincidencia de energía via el ansatz con resultado de diagonalización
+        eigs_diag_M = real(eigenvalues_diag(M_diag == M_val));  % Autovalores para este M_val según diagonalización
+
+        % Generar todas las combinaciones posibles de m_j
+        m_vals = 0:N-1;
+        grid = cell(1, M_val);
+        [grid{:}] = ndgrid(m_vals);
+
+        % Cada fila es una combinación
+        m_combinations = reshape(cat(M_val+1, grid{:}), [], M_val);
+        
+        % Sin importar el orden
+        m_combinations = unique(sort(m_combinations, 2), 'rows');
+
+        soluciones_para_M = [];
+
+        % Bucle que resuelve las ecuaciones para cada posible combinación de los m_j 
         for idx = 1:size(m_combinations, 1)
             m_j = m_combinations(idx, :);
-            % Resolver las ecuaciones de Bethe para esta combinación de m_j
-            lambda_sol = solve_bethe_eqs(N, M_val, m_j);
-            if ~isempty(lambda_sol)
-% -------------------------------------------------------------------------
-% Conversión de λ_j a k_j ajustando la rama:
-%   k_j0 = 2*atan(1/λ_j),
-%   k_j = k_j0 + 2π * round((2π*m_j/N - k_j0)/(2π)).
-%
-% Energía:
-%   E = ∑_{j=1}^M 2/(λ_j^2 + 1).
-% -------------------------------------------------------------------------
-                % Calcular cuasimomentos k_j
-                k_j = 2 * atan(1 ./ lambda_sol);
-                % Asegurar valores en el rango [0, 2π)
-                k_j = mod(real(k_j), 2*pi);
+            match_found = false;
+            attempts = 0;
+    
+            % Se resuelven las ecuaciones de Bethe hasta encontrar el
+            % autoestado (definido por la diagonalización). Se para si a
+            % las 100 iteraciones no se ha logrado.
+            while ~match_found && attempts < 100
+                attempts = attempts + 1;
 
-                % Calcular la energía
-                E = sum(2 ./ (lambda_sol.^2 + 1));
-                En = E0 + J * E;
-                energies = [energies, En];
+            % Condición inicial para k_j, evitando singularidades
+            epsilon = 1e-3;
+            k0 = mod(2*pi*(m_j)/N + epsilon * randn(1, M_val), 2*pi); % Perturbación aleatoria pequeña
+
+            % Verificación previa
+            try
+                test_output = bethe_eqs_full(k0, m_j, N);
+                if any(isnan(test_output)) || any(isinf(test_output))
+                    continue;  % Saltar combinaciones malas
+                end
+            catch
+                continue;  % Saltar si ocurre error en evaluación
+            end
+            % Resolver las ecuaciones de Bethe para la combinación de m_j
+            options = optimoptions('fsolve', ...
+                'Display', 'off', ...
+                'TolFun', 1e-12, ...
+                'TolX', 1e-12, ...
+                'MaxFunEvals', 1e4, ...
+                'MaxIter', 1e4);
+            [k_sol, ~, exitflag] = fsolve(@(k) bethe_eqs_full(k, m_j, N), k0, options);
+
+            if exitflag <= 0 || any(isnan(k_sol)) || any(isinf(k_sol))
+                continue;
+            end
+
+            % Ordenar y evitar duplicados
+            k_sol = sort(mod(k_sol, 2*pi));
+            if ~isempty(soluciones_para_M)
+                if any(all(abs(soluciones_para_M - k_sol) < 1e-6, 2))
+                    continue;
+                end
+            end
+            soluciones_para_M = [soluciones_para_M; k_sol];
+
+            % Calcular energía
+            EM = E0 + J * hbar^2 * sum(1 - cos(k_sol)) - B * (N/2 - M_val) * hbar;
+
+            % Comparar con autovalores numéricos
+            if any(abs(EM - eigs_diag_M) < tol_match)
+                match_found = true;
+
+                energies = [energies, EM];
+
 
 % Mostrar resultados
 fprintf('\n--------------------------------------------------\n');
 fprintf('Estado para M = %d\n', M_val);
 fprintf('Combinación m_j = [ %s ]\n', num2str(m_j));
-fprintf('Rapidities λ_j  = [ %s ]\n', num2str(lambda_sol, '%.6f '));
-fprintf('Cuasimomentos k_j = [ %s ]\n', num2str(k_j, '%.6f '));
-fprintf('Energía E = %.12f\n', En);
+fprintf('Cuasimomentos k_j = [ %s ]\n', num2str(k_sol, '%.6f '));
+fprintf('Energía E = %.12f\n', EM);
 fprintf('--------------------------------------------------\n');
-
             end
+            end
+            
         end
+
         % Eliminar duplicados numéricos
         energies = unique(round(energies*1e8)/1e8);
         E_bethe{M_val+1} = energies - B*(N/2 - M_val);
@@ -238,80 +299,67 @@ function [eigenvalues, M_vector, V] = diagonalize_XXX(N, J, B)
     eigenvalues = diag(D);
     
     % Calcular M (espines volteados)
-    M_vector = zeros(size(eigenvalues));
-    for i = 1:length(eigenvalues)
-        [~, idx] = max(abs(V(:, i)));  % Componente dominante
-        state_index = idx - 1;         % Índice 0-base
-        bin_state = dec2bin(state_index, N) - '0';  % Convertir a binario
-        M_vector(i) = sum(bin_state);  % Contar espines volteados
+    M_vector = calculate_M_from_Sz(V, N);
+end
+
+%% ------------------------------------------------------------------------
+% Función: Diagonaliza S_T^z en la misma base para cada autovector y le
+% asigna el valor de M correspondiente.
+function M_vector = calculate_M_from_Sz(V, N)
+    % Calcula M como el número de espines volteados usando S_z^total
+    sz = [1 0; 0 -1]/2;
+    id = eye(2);
+    Sz_total = zeros(2^N);
+
+    % Construir el operador S^z total
+    for i = 1:N
+        term = 1;
+        for j = 1:N
+            if j == i
+                term = kron(term, sz);
+            else
+                term = kron(term, id);
+            end
+        end
+        Sz_total = Sz_total + term;
+    end
+
+    % Para cada autovector, calcula el valor esperado de S^z total
+    M_vector = zeros(size(V, 2), 1);  % M para cada autovector
+    for i = 1:size(V, 2)
+        psi = V(:, i);
+        sz_total_exp = real(psi' * Sz_total * psi);
+        % M = N/2 - ⟨S^z⟩
+        M_vector(i) = round(N/2 - sz_total_exp);  % redondear a entero
     end
 end
 
 %% ------------------------------------------------------------------------
 % Función: Resolver ecuaciones de Bethe para una combinación de m_j
-function lambda_sol = solve_bethe_eqs(N, M, m_j)
-
-% =========================================================================
-% Resolución de las ecuaciones de Bethe según el estado seleccionado 
-% (combinación de m_j)
-% =========================================================================
-    % Función anónima que define las ecuaciones de Bethe
-    fun = @(lam) bethe_eqs(lam, N, M);
-    
-    % Semilla inicial para λ_j (aproximación para sistema no
-    % interactuante).
-    % Fórmula: λ_j ≈ M * cot(k_j/2). Relación del límite termodinámico.
-    lambda0 = M * cot(pi * m_j / N);
-    
-    % Manejo de singularidades: Si m_j = 0 o N, cot(π*m_j/N) es infinito.
-    bad = ~isfinite(lambda0);  % Detecta valores NaN/Inf.
-    if any(bad)
-        warning('Semilla singular, usando valores aleatorios.');
-        lambda0(bad) = 1e6;  % Valor grande para λ, que se traduce en un
-                             % infinito aproximado.
-    end
-    
-    % Opciones del solver
-    opts = optimoptions('fsolve', ...
-        'Display', 'off', ...
-        'TolFun', 1e-12, ...
-        'TolX', 1e-12, ...
-        'MaxFunEvals', 1e4, ...
-        'MaxIter', 1e4);
-    
-    % Resolver ecuaciones de Bethe
-    [lambda_sol, fval, exitflag] = fsolve(fun, lambda0, opts);
-    
-    % Verificar convergencia
-    if exitflag <= 0
-        warning(['fsolve no convergió para m_j = [%s], exitflag = %d, ' ...
-            '||fval|| = %.2e'], num2str(m_j), exitflag, norm(fval));
-        lambda_sol = [];
+function F = bethe_eqs_full(k, m, N)
+    M = length(k);
+    F = zeros(1, M);
+    for j = 1:M
+        sum_theta = 0;
+        for l = 1:M
+            if l ~= j
+                delta_cot = cot_safe(k(j)/2) - cot_safe(k(l)/2);
+                theta_jl = 2 * atan2(1, 0.5 * delta_cot);
+                sum_theta = sum_theta + theta_jl;
+            end
+        end
+        F(j) = N * k(j) - 2 * pi * m(j) - sum_theta;
     end
 end
 
 %% ------------------------------------------------------------------------
-% Función: Ecuaciones de Bethe
-function F = bethe_eqs(lambda, N, M)
-% =====================================================================
-% Construcción de las ecuaciones de Bethe
-% =====================================================================
-% Ecuaciones de Bethe en función de las rapidities (λ_j):
-%   ((λ_j + i)/(λ_j - i))^N = ∏_{l≠j} ((λ_j - λ_l + 2i)/(λ_j - λ_l - 2i)),
-%   j = 1,...,M.
-% -------------------------------------------------------------------------
-    i = 1i;
-    F = zeros(M,1);
-    
-    for j = 1:M
-        lhs = ((lambda(j) + i) / (lambda(j) - i))^N;
-        rhs = 1;
-        for l = 1:M
-            if l ~= j
-                rhs = rhs * ((lambda(j) - lambda(l) + 2*i) / ...
-                             (lambda(j) - lambda(l) - 2*i));
-            end
-        end
-        F(j) = lhs - rhs;
+% Función: Evita singularidades
+function c = cot_safe(x)
+    tol = 1e-6;
+    xmod = mod(x, pi);
+    if abs(xmod) < tol || abs(xmod - pi) < tol
+        c = 1 / tan(x + tol * sign(x + 1e-12)); 
+    else
+        c = cot(x);
     end
 end
