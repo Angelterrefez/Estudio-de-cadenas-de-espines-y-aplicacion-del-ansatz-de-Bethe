@@ -1,3 +1,11 @@
+% -*- coding: utf-8 -*-
+% -*- babel: spanish -*-
+
+% -------------------------------------------------------------------------
+% Creado el 03/07/2025
+% @author: José Ángel Terrero Fernández
+% -------------------------------------------------------------------------
+
 %% Script para representar el continuo de M-magnones, el estado ligado 
 %% y la dispersión de un solo magnón con campo externo magnético aplicado.
 % -------------------------------------------------------------------------
