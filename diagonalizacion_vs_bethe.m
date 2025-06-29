@@ -1,3 +1,11 @@
+% -*- coding: utf-8 -*-
+% -*- babel: spanish -*-
+
+% -------------------------------------------------------------------------
+% Creado el 3/07/2025
+% @author: José Ángel Terrero Fernández
+% -------------------------------------------------------------------------
+
 %% Código para comparar la solución proporcionada por el ansatz de Bethe 
 %% con la diagonalización numérica del hamiltoniano.
 % -------------------------------------------------------------------------
