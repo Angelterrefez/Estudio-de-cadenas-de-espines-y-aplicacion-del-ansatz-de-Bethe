@@ -1,3 +1,11 @@
+% -*- coding: utf-8 -*-
+% -*- babel: spanish -*-
+
+% -------------------------------------------------------------------------
+% Creado el 03/07/2025
+% @author: José Ángel Terrero Fernández
+% -------------------------------------------------------------------------
+
 %% Bethe ansatz "solver" para la cadena XXX espín-1/2 (Periódica, B=0)
 % -------------------------------------------------------------------------
 % El script resuelve numéricamente las ecuaciones de Bethe a partir del 
